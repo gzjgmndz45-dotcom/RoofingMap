@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Meine Cloud Karte</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+<style>
+body, html { margin:0; height:100%; font-family:Arial; }
+#map { height:100%; width:100%; }
+</style>
+</head>
+
+<body>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+
+<script>
+// =====================
+// SUPABASE SETUP
+// =====================
+const SUPABASE_URL = "https://dnjhciqhuopobhyyxkfr.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRuamhjaXFodW9wb2JoeXl4a2ZyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMDYzMzgsImV4cCI6MjA5NDc4MjMzOH0.CtssFDbfkMohj8hwXNPcWbsxN5Xbg8bKfoWvTG0QWzA";
+
+const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+async function uploadPhoto(file) {
+  const fileName = Date.now() + "_" + file.name;
+
+  const { data, error } = await client.storage
+    .from("photos")
+    .upload(fileName, file);
+
+  if (error) {
+    console.error(error);
+    return null;
+  }
+
+  const { data: publicUrl } = client.storage
+    .from("photos")
+    .getPublicUrl(fileName);
+
+  return publicUrl.publicUrl;
+}
+// =====================
+// MAP
+// =====================
+const map = L.map('map').setView([52.5, 13.4], 13);
+
+const sat = L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+).addTo(map);
+
+// =====================
+// ICONS
+// =====================
+const icons = {
+  nothing: L.icon({ iconUrl:"https://maps.gstatic.com/mapfiles/ms2/micons/yellow.png", iconSize:[32,32]}),
+  tool: L.icon({ iconUrl:"https://maps.gstatic.com/mapfiles/ms2/micons/blue.png", iconSize:[32,32]}),
+  roof: L.icon({ iconUrl:"https://maps.gstatic.com/mapfiles/ms2/micons/brown.png", iconSize:[32,32]})
+};
+
+// =====================
+// ADDRESS
+// =====================
+async function getAddress(lat,lng){
+  try{
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
+    const d = await r.json();
+    return d.display_name || "keine Adresse";
+  } catch {
+    return "keine Adresse";
+  }
+}
+
+// =====================
+// LOAD MARKERS
+// =====================
+async function loadMarkers(){
+  const { data } = await client.from("places").select("*");
+
+  data.forEach(p=>{
+    const marker = L.marker([p.lat,p.lng],{
+      icon: icons[p.category] || icons.nothing
+    }).addTo(map);
+
+    let photosHTML = "";
+
+    if (p.photos && p.photos.length > 0) {
+      photosHTML = p.photos.map(url =>
+        `<img src="${url}" width="80" style="margin:2px;border-radius:6px;">`
+      ).join("");
+    }
+
+    marker.bindPopup(`
+      <b>${p.name}</b><br>
+      📍 ${p.address}<br>
+      🏷 ${p.category}<br>
+      📝 ${p.info}<br><br>
+      ${photosHTML}
+    `);
+  });
+}
+
+loadMarkers();
+
+// =====================
+// ADD MARKER
+// =====================
+map.on('click', async (e)=>{
+
+  const name = prompt("Name:");
+  const info = prompt("Notizen:");
+  const category = prompt("Kategorie: nothing / tool / roof","nothing");
+
+  const address = await getAddress(e.latlng.lat,e.latlng.lng);
+
+  const input = document.createElement("input");
+  input.type = "file";
+  input.multiple = true;
+
+  input.onchange = async () => {
+
+    let photoUrls = [];
+
+    for (let file of input.files) {
+      const url = await uploadPhoto(file);
+      if (url) photoUrls.push(url);
+    }
+
+    const { data, error } = await client.from("places").insert([{
+  name,
+  info,
+  category,
+  lat: e.latlng.lat,
+  lng: e.latlng.lng,
+  address,
+  photos: photoUrls
+}]).select();
+
+if (error) {
+  console.error("❌ INSERT ERROR:", error);
+  alert("Fehler beim Speichern: " + error.message);
+  return;
+}
+
+console.log("✅ INSERT OK:", data);
+alert("Gespeichert!");
+
+location.reload();
+  };
+
+  input.click();
+});
+
+</script>
+</body>
+</html>
