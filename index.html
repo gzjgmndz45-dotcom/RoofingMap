@@ -1,162 +1,88 @@
 <!DOCTYPE html>
-<html>
+<html lang="de">
 <head>
-<meta charset="utf-8" />
-<title>Meine Cloud Karte</title>
-
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-
-<style>
-body, html { margin:0; height:100%; font-family:Arial; }
-#map { height:100%; width:100%; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meine Marker Karte</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { margin:0; padding:0; }
+    #map { height:100vh; width:100%; }
+    .legend { position:absolute; bottom:20px; left:20px; background:white; padding:10px; border-radius:8px; box-shadow:0 0 10px rgba(0,0,0,0.3); z-index:1000; }
+  </style>
 </head>
-
 <body>
-<div id="map"></div>
+  <div id="map"></div>
 
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <div class="legend">
+    <b>Legende:</b><br>
+    <span style="color:green">●</span> Grün = Dach<br>
+    <span style="color:orange">●</span> Gelb = Komplikationen<br>
+    <span style="color:red">●</span> Rot = Nein
+  </div>
 
-<!-- Supabase -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const supabase = Supabase.createClient(
+      'https://vxnvskwmhxbzmdzozmvp.supabase.co',
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ4bnZza3dtaHhiem1kem96bXZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNzY4NjAsImV4cCI6MjA5NDg1Mjg2MH0.S5FO-LiN_90gFR2PdtzoOCawy4f_zImrmfLEz16D8e4'
+    );
 
-<script>
-// =====================
-// SUPABASE SETUP
-// =====================
-const SUPABASE_URL = "https://dnjhciqhuopobhyyxkfr.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRuamhjaXFodW9wb2JoeXl4a2ZyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMDYzMzgsImV4cCI6MjA5NDc4MjMzOH0.CtssFDbfkMohj8hwXNPcWbsxN5Xbg8bKfoWvTG0QWzA";
+    let map = L.map('map').setView([51.5, 10], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-async function uploadPhoto(file) {
-  const fileName = Date.now() + "_" + file.name;
+    let satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
+    L.control.layers({"Normal": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'), "Satellit": satellite}, {}, {position:'topright'}).addTo(map);
 
-  const { data, error } = await client.storage
-    .from("photos")
-    .upload(fileName, file);
+    let markerGroup = L.layerGroup().addTo(map);
 
-  if (error) {
-    console.error(error);
-    return null;
-  }
-
-  const { data: publicUrl } = client.storage
-    .from("photos")
-    .getPublicUrl(fileName);
-
-  return publicUrl.publicUrl;
-}
-// =====================
-// MAP
-// =====================
-const map = L.map('map').setView([52.5, 13.4], 13);
-
-const sat = L.tileLayer(
-  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-).addTo(map);
-
-// =====================
-// ICONS
-// =====================
-const icons = {
-  nothing: L.icon({ iconUrl:"https://maps.gstatic.com/mapfiles/ms2/micons/yellow.png", iconSize:[32,32]}),
-  tool: L.icon({ iconUrl:"https://maps.gstatic.com/mapfiles/ms2/micons/blue.png", iconSize:[32,32]}),
-  roof: L.icon({ iconUrl:"https://maps.gstatic.com/mapfiles/ms2/micons/brown.png", iconSize:[32,32]})
-};
-
-// =====================
-// ADDRESS
-// =====================
-async function getAddress(lat,lng){
-  try{
-    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
-    const d = await r.json();
-    return d.display_name || "keine Adresse";
-  } catch {
-    return "keine Adresse";
-  }
-}
-
-// =====================
-// LOAD MARKERS
-// =====================
-async function loadMarkers(){
-  const { data } = await client.from("places").select("*");
-
-  data.forEach(p=>{
-    const marker = L.marker([p.lat,p.lng],{
-      icon: icons[p.category] || icons.nothing
-    }).addTo(map);
-
-    let photosHTML = "";
-
-    if (p.photos && p.photos.length > 0) {
-      photosHTML = p.photos.map(url =>
-        `<img src="${url}" width="80" style="margin:2px;border-radius:6px;">`
-      ).join("");
+    function createIcon(color) {
+      return L.divIcon({html: `<div style="background:${color};width:24px;height:24px;border-radius:50%;border:3px solid white;"></div>`, iconSize:[28,28], iconAnchor:[14,14]});
     }
 
-    marker.bindPopup(`
-      <b>${p.name}</b><br>
-      📍 ${p.address}<br>
-      🏷 ${p.category}<br>
-      📝 ${p.info}<br><br>
-      ${photosHTML}
-    `);
-  });
-}
-
-loadMarkers();
-
-// =====================
-// ADD MARKER
-// =====================
-map.on('click', async (e)=>{
-
-  const name = prompt("Name:");
-  const info = prompt("Notizen:");
-  const category = prompt("Kategorie: nothing / tool / roof","nothing");
-
-  const address = await getAddress(e.latlng.lat,e.latlng.lng);
-
-  const input = document.createElement("input");
-  input.type = "file";
-  input.multiple = true;
-
-  input.onchange = async () => {
-
-    let photoUrls = [];
-
-    for (let file of input.files) {
-      const url = await uploadPhoto(file);
-      if (url) photoUrls.push(url);
+    async function loadMarkers() {
+      markerGroup.clearLayers();
+      const { data } = await supabase.from('markers').select('*');
+      data?.forEach(m => {
+        let marker = L.marker([m.lat, m.lng], {icon: createIcon(m.color)}).addTo(markerGroup);
+        marker.bindPopup(`<b>${m.title||''}</b><br>${m.info||''}<br><br>${m.photo_url?`<img src="${m.photo_url}" style="max-width:200px">`:''}<br><button onclick="deleteMarker('${m.id}')">Löschen</button>`);
+      });
     }
 
-    const { data, error } = await client.from("places").insert([{
-  name,
-  info,
-  category,
-  lat: e.latlng.lat,
-  lng: e.latlng.lng,
-  address,
-  photos: photoUrls
-}]).select();
+    async function saveMarker(lat, lng, color, title, info, file) {
+      let photo_url = null;
+      if (file) {
+        const fileName = Date.now() + file.name;
+        await supabase.storage.from('marker-photos').upload(fileName, file);
+        photo_url = supabase.storage.from('marker-photos').getPublicUrl(fileName).data.publicUrl;
+      }
+      await supabase.from('markers').insert({lat, lng, color, title, info, photo_url});
+      loadMarkers();
+    }
 
-if (error) {
-  console.error("❌ INSERT ERROR:", error);
-  alert("Fehler beim Speichern: " + error.message);
-  return;
-}
+    window.deleteMarker = async (id) => {
+      if(confirm('Löschen?')) {
+        await supabase.from('markers').delete().eq('id', id);
+        loadMarkers();
+      }
+    };
 
-console.log("✅ INSERT OK:", data);
-alert("Gespeichert!");
+    map.on('click', (e) => {
+      let color = prompt("grün/gelb/rot", "grün");
+      let title = prompt("Titel");
+      let info = prompt("Info");
+      if(confirm("Foto?")) {
+        let i = document.createElement('input');
+        i.type='file'; i.accept='image/*';
+        i.onchange = ev => saveMarker(e.latlng.lat, e.latlng.lng, color, title, info, ev.target.files[0]);
+        i.click();
+        return;
+      }
+      saveMarker(e.latlng.lat, e.latlng.lng, color, title, info, null);
+    });
 
-location.reload();
-  };
-
-  input.click();
-});
-
-</script>
+    loadMarkers();
+  </script>
 </body>
 </html>
